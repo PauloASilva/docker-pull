@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+# change this variable according to reflect docker binary location in your
+# system
+readonly DOCKER_BIN=/usr/bin/docker
+
+readonly VULN_CONTAINERS_URL="https://vulnerablecontainers.org"
+readonly SEVERITY_LEVELS_NAMES=("CRITICAL" "HIGH" "MEDIUM" "LOW" "UNKNOWN")
+readonly SEVERITY_LEVELS_COLORS=($(tput setab 1) $(tput setaf 1)
+    $(tput setaf 13) $(tput setaf 3) $(tput setaf 7))
+
+"$DOCKER_BIN" "$@"
+readonly EXIT_CODE=$?
+
+if [ "$1" != "pull" ];
+then
+    exit $EXIT_CODE
+fi
+
+echo "Looking for known vulnerabilities..."
+
+image_slug="${2/\//}"
+report_url="$VULN_CONTAINERS_URL/reports/$image_slug.json"
+
+if [ "$image_slug" = "$2" ];
+then
+    report_url="$VULN_CONTAINERS_URL/official/reports/$image_slug.json"
+fi
+
+report=$(wget -qO- "$report_url")
+result=$(echo "$report" | jq -r '.[0].Vulnerabilities[] .Severity' | sort | \
+    uniq -c)
+
+if [ -z "$result" ];
+then
+    echo "Report not found"
+else
+    echo -n "Resume: "
+
+    readonly reset=$(tput sgr0)
+    readonly len=${#SEVERITY_LEVELS_NAMES[@]}
+
+    for (( i=0; i<$len; i++ ));
+    do
+        name="${SEVERITY_LEVELS_NAMES[$i]}"
+        p_name="${name:0:1}$(echo "${name:1}" | tr [A-Z] [a-z])"
+        color="${SEVERITY_LEVELS_COLORS[$i]}"
+
+        temp=$( \
+            echo "$result" | \
+            sed -rn 's/ +([0-9]+) '"$name"'/'"$color"'\1'"$reset $p_name"'/p'\
+        )
+
+        if [ ! -z "$temp" ];
+        then
+            line="$line, $temp"
+        fi
+    done
+
+    echo "${line##, }"
+    echo "Report: $report_url"
+fi
+
+exit $EXIT_CODE
+
